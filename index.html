@@ -18,6 +18,14 @@ h2{margin-top:0}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(
 footer{text-align:center;padding:30px;color:#64748b}
 .btn{display:inline-block;padding:11px 16px;background:#2563eb;color:white;border-radius:10px;text-decoration:none;margin:5px}
 </style>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+#admin{margin-top:22px}.admin-box{border:1px solid #e5e7eb;border-radius:14px;padding:18px}
+#admin input{width:100%;padding:12px;margin:6px 0 12px;border:1px solid #d1d5db;border-radius:10px}
+#dashboard{display:none}.file-row{display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap;border:1px solid #e5e7eb;border-radius:12px;padding:12px;margin:8px 0}
+.small{font-size:13px;color:#64748b}.danger{background:#dc2626!important;color:#fff!important;border:0;cursor:pointer}
+</style>
 </head>
 <body>
 <header>
@@ -47,8 +55,84 @@ footer{text-align:center;padding:30px;color:#64748b}
 <div class="card"><h3>Documents</h3><p>Add links to files you want to keep accessible.</p><a href="#">Open Files →</a></div>
 </div></section>
 
+
+<section id="admin">
+<h2>Admin Login</h2>
+<div id="loginBox" class="admin-box">
+<form id="loginForm">
+<input id="email" type="email" placeholder="Login email" required>
+<input id="password" type="password" placeholder="Password" required>
+<button class="btn" type="submit">Login</button>
+</form>
+<p id="loginStatus"></p>
+</div>
+
+<div id="dashboard" class="admin-box">
+<p><strong>Dashboard</strong> <button id="logoutBtn" class="btn danger">Logout</button></p>
+<p class="small">Private files are stored in your Supabase bucket.</p>
+<input id="fileInput" type="file">
+<button id="uploadBtn" class="btn">Upload File</button>
+<p id="fileStatus"></p>
+<h3>Your Files</h3>
+<div id="fileList"></div>
+</div>
+</section>
+
 <section id="contact"><h2>Contact</h2><a class="btn" href="mailto:your@email.com">Email Me</a></section>
 </main>
 <footer>© 2026 Rahul • Personal Portfolio</footer>
+
+<script>
+const SUPABASE_URL = "const SUPABASE_URL = "https://qyydvqnbtmnhcjswvwd.supabase.co";";
+const SUPABASE_PUBLISHABLE_KEY = "sb_publishable_mxdEq_8C208tAOcSC9fNTg_i9qV8Gy0";
+const {createClient}=window.supabase;
+const sb=createClient(SUPABASE_URL,SUPABASE_PUBLISHABLE_KEY);
+const BUCKET="my-files";
+const $=id=>document.getElementById(id);
+function status(id,msg,error=false){$(id).textContent=msg;$(id).style.color=error?"#dc2626":"#15803d"}
+
+async function ui(){
+ const {data:{session}}=await sb.auth.getSession();
+ $("loginBox").style.display=session?"none":"block";
+ $("dashboard").style.display=session?"block":"none";
+ if(session) loadFiles();
+}
+$("loginForm").onsubmit=async e=>{
+ e.preventDefault();status("loginStatus","Logging in...");
+ const {data,error}=await sb.auth.signInWithPassword({email:$("email").value.trim(),password:$("password").value});
+ if(error)return status("loginStatus",error.message,true);
+ status("loginStatus","Login successful.");ui();
+};
+$("logoutBtn").onclick=async()=>{await sb.auth.signOut();ui()};
+$("uploadBtn").onclick=async()=>{
+ const {data:{session}}=await sb.auth.getSession(),f=$("fileInput").files[0];
+ if(!session)return status("fileStatus","Please login first.",true);
+ if(!f)return status("fileStatus","Choose a file first.",true);
+ if(f.size>50*1024*1024)return status("fileStatus","Maximum file size is 50 MB.",true);
+ status("fileStatus","Uploading...");
+ const name=f.name.replace(/[^a-zA-Z0-9._-]/g,"_"),path=session.user.id+"/"+Date.now()+"-"+name;
+ const {error}=await sb.storage.from(BUCKET).upload(path,f);
+ if(error)return status("fileStatus",error.message,true);
+ $("fileInput").value="";status("fileStatus","Uploaded successfully.");loadFiles();
+};
+async function loadFiles(){
+ const {data:{session}}=await sb.auth.getSession();if(!session)return;
+ const {data,error}=await sb.storage.from(BUCKET).list(session.user.id,{limit:100,sortBy:{column:"created_at",order:"desc"}});
+ if(error)return $("fileList").textContent=error.message;
+ $("fileList").innerHTML="";
+ if(!data.length){$("fileList").textContent="No files uploaded yet.";return}
+ data.forEach(f=>{
+  const row=document.createElement("div");row.className="file-row";
+  const n=document.createElement("span");n.textContent=f.name;
+  const d=document.createElement("button");d.className="btn";d.textContent="Download";
+  d.onclick=async()=>{const r=await sb.storage.from(BUCKET).createSignedUrl(session.user.id+"/"+f.name,60);if(r.error)alert(r.error.message);else location.href=r.data.signedUrl};
+  const x=document.createElement("button");x.className="btn danger";x.textContent="Delete";
+  x.onclick=async()=>{if(confirm("Delete this file?")){const r=await sb.storage.from(BUCKET).remove([session.user.id+"/"+f.name]);if(r.error)alert(r.error.message);else loadFiles()}};
+  row.append(n,d,x);$("fileList").appendChild(row);
+ });
+}
+sb.auth.onAuthStateChange(()=>ui());ui();
+</script>
+
 </body>
 </html>
